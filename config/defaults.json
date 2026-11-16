@@ -1,0 +1,20 @@
+{
+  "game_title": "MotoGP",
+  "preset": "Lightweight",
+  "device_idx": 0,
+  "output_idx": 0,
+  "monitor_left": 0,
+  "monitor_top": 0,
+  "deadzone": 0.12,
+  "minimize_to_tray": true,
+  "controller_stop_mask": 48,
+  "hotkeys": {
+    "record": "F6",
+    "brake": "F7",
+    "assist": "F8",
+    "steer": "F9",
+    "mode": "F10",
+    "throttle": "F11",
+    "stop": "F12"
+  }
+}
