@@ -10,7 +10,9 @@ import numpy as np
 from .config import PRESETS
 from .models import Frame, InputState
 from .recording import Recorder
-from .windows import Windows, XInput
+from .windows import Windows
+from .controllers import ControllerManager
+from .vision import Analyzer
 
 class Runtime:
     def __init__(self, settings, simulate=False, video=None):
@@ -19,6 +21,7 @@ class Runtime:
         self.stop_event = threading.Event()
         self.inputs = collections.deque(maxlen=512)
         self.frame = None
+        self.calibration_frame = None
         self.recorder = None
         self.status = "Starting"
         self.game = None
@@ -26,28 +29,87 @@ class Runtime:
         self.target_fps = PRESETS[settings.preset][0]
         self.emergency = False
         self.threads = []
+        self.observation = None
+        self.observation_frame = None
+        self.recognition_error = None
+        self.controller_report = {"devices":[],"active":None,"errors":{}}
+        self.controller_request = None
+        self.analysis_generation = 0
 
     def start(self):
-        for name, fn in (("controller", self._controller), ("capture", self._capture)):
+        for name, fn in (("controller", self._controller), ("capture", self._capture), ("recognition", self._recognition)):
             thread = threading.Thread(target=fn, name=name, daemon=True)
             self.threads.append(thread); thread.start()
 
+    def select_controller(self, backend="auto", selected="auto"):
+        with self.lock: self.controller_request = (backend, selected)
+
+    def update_calibration(self, rois):
+        from .vision import validate_rois
+        with self.lock:
+            self.settings.hud_rois = dict(validate_rois(rois)); self.analysis_generation += 1
+
     def _controller(self):
+        device = None
         try:
-            device = XInput() if not self.simulate and not self.video else None
+            device = ControllerManager(self.settings.controller_backend,self.settings.controller_device) if not self.simulate and not self.video else None
             stop_held = False
             while not self.stop_event.is_set():
-                now = time.perf_counter()
-                sample = device.poll() if device else InputState(now, True, 0, math.sin(now)*0.5, 0, 0, 0, max(0, math.sin(now/2))*0.4, 0.65, 0)
-                with self.lock: self.inputs.append(sample)
-                pressed = sample.buttons & self.settings.controller_stop_mask == self.settings.controller_stop_mask
-                if pressed and not stop_held:
-                    self.emergency = True
-                stop_held = pressed
-                self.stop_event.wait(0.008)
-        except Exception:
-            logging.exception("Controller polling failed")
-            with self.lock: self.inputs.append(InputState(time.perf_counter()))
+                now=time.perf_counter()
+                try:
+                    with self.lock:
+                        request,self.controller_request=self.controller_request,None
+                    if request and device:
+                        device.close();device=ControllerManager(*request)
+                    sample=device.poll() if device else InputState(now,True,0,math.sin(now)*.5,0,0,0,max(0,math.sin(now/2))*.4,.65,4096 if int(now)%2 else 0)
+                    with self.lock:
+                        self.inputs.append(sample)
+                        self.controller_report=device.report() if device else {"devices":[{"id":"synthetic","name":"Synthetic Xbox inputs","backend":"simulation"}],"active":{"id":"synthetic","name":"Synthetic Xbox inputs","backend":"simulation"},"errors":{}}
+                    pressed=sample.buttons & self.settings.controller_stop_mask == self.settings.controller_stop_mask
+                    if pressed and not stop_held:self.emergency=True
+                    stop_held=pressed
+                except Exception as exc:
+                    logging.exception("Controller polling error; will retry")
+                    with self.lock:
+                        self.inputs.append(InputState(time.perf_counter()))
+                        self.controller_report["errors"]={"worker":str(exc)}
+                    self.stop_event.wait(1)
+                self.stop_event.wait(.008)
+        finally:
+            if device:device.close()
+
+    def _recognition(self):
+        analyzer=None;generation=-1;last=-1
+        while not self.stop_event.is_set():
+            started=time.perf_counter()
+            with self.lock:
+                frame=self.frame;current_generation=self.analysis_generation
+                rois=dict(self.settings.hud_rois)
+            if frame is not None and frame.sequence!=last and started-frame.timestamp<.5:
+                try:
+                    if analyzer is None or generation!=current_generation:
+                        analyzer=Analyzer(rois,unit=self.settings.speed_unit,min_confidence=self.settings.recognition_confidence);generation=current_generation
+                    physical=self.sample_for(frame.timestamp)
+                    observation=analyzer.analyze(frame.image,frame.sequence,frame.timestamp)
+                    observation["input"]=asdict(physical) if physical else None
+                    observation["input_valid"]=bool(physical and physical.connected and 0<=frame.timestamp-physical.timestamp<=.1)
+                    observation["input_kind"]="synthetic" if self.simulate or self.video else "physical"
+                    with self.lock:
+                        if generation==self.analysis_generation:
+                            self.observation=observation;self.observation_frame=frame;self.recognition_error=None
+                            if self.recorder:self.recorder.submit_observation(observation)
+                    last=frame.sequence
+                except Exception as exc:
+                    logging.exception("Recognition failed; continuing capture")
+                    self.recognition_error=str(exc)
+            self.stop_event.wait(max(.01,1/self.settings.recognition_hz-(time.perf_counter()-started)))
+
+    def mark_lap(self):
+        with self.lock:
+            if not self.recorder:raise RuntimeError("Start a reference recording before marking laps")
+            frame=self.frame
+            if frame is None or time.perf_counter()-frame.timestamp>.5:raise RuntimeError("No fresh frame; focus the game before marking a lap")
+            return self.recorder.mark_lap(frame.timestamp)
 
     def sample_for(self, timestamp):
         with self.lock:
@@ -96,6 +158,8 @@ class Runtime:
                     cv2.fillPoly(image, [np.array([[150,540],[430,180],[530,180],[810,540]])], (55,55,55))
                     cv2.line(image, (480+int(math.sin(started)*40),540), (480,180), (220,180,40), 4)
                     cv2.putText(image, "SIMULATED FRAME - NO GAME DATA", (40,80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
+                    cv2.putText(image, "180 km/h", (730,470), cv2.FONT_HERSHEY_SIMPLEX, .9, (255,255,255), 2)
+                    cv2.putText(image, "GEAR 3", (730,515), cv2.FONT_HERSHEY_SIMPLEX, .8, (255,255,255), 2)
                 if image is not None:
                     acquired = time.perf_counter()
                     width = PRESETS[self.settings.preset][1]
@@ -107,6 +171,7 @@ class Runtime:
                     stamps.append(acquired)
                     with self.lock:
                         self.frame = frame
+                        self.calibration_frame = frame
                         self.status = "Synthetic capture" if self.simulate else "Video replay (synthetic controller)" if video else self.game["title"]
                         self.fps = (len(stamps)-1)/(stamps[-1]-stamps[0]) if len(stamps)>1 else 0
                         if self.recorder: self.recorder.submit(frame, self.sample_for(acquired))
@@ -140,7 +205,7 @@ class Runtime:
 
     def stop(self):
         self.stop_event.set()
-        for thread in self.threads: thread.join(timeout=3)
+        for thread in self.threads: thread.join(timeout=10)
         self.stop_recording()
         if any(thread.is_alive() for thread in self.threads):
             raise RuntimeError("A device worker is still stopping; retry Quit after it returns")

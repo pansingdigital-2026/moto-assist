@@ -133,3 +133,13 @@ def test_sample_association_never_uses_future_sample():
     assert runtime.sample_for(0.5) is None
     assert runtime.sample_for(2.5).rt==0.2
     assert runtime.sample_for(3).rt==0.3
+
+def test_old_settings_migrate_without_overwriting_custom_shortcuts(tmp_path):
+    from dataclasses import asdict
+    path=tmp_path/'settings.json';old=asdict(Settings())
+    old['hotkeys'].pop('lap');old['hotkeys']['stop']='F5'
+    for name in ('controller_backend','controller_device','hud_rois','recognition_hz','recognition_confidence','speed_unit'):old.pop(name)
+    path.write_text(json.dumps(old))
+    settings=Settings.load(path)
+    assert settings.hotkeys['stop']=='F5' and settings.hotkeys['lap']!='F5'
+    assert settings.controller_backend=='auto' and settings.recognition_hz==2

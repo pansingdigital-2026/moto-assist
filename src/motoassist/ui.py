@@ -10,7 +10,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QIcon, QImage, QPixmap, QPainter
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QComboBox, QTabWidget, QFormLayout, QProgressBar, QSlider, QCheckBox, QPlainTextEdit,
-    QMessageBox, QSystemTrayIcon, QMenu, QSpinBox, QDoubleSpinBox, QLineEdit, QListWidget, QGroupBox)
+    QMessageBox, QSystemTrayIcon, QMenu, QSpinBox, QDoubleSpinBox, QLineEdit, QListWidget, QListWidgetItem, QGroupBox, QScrollArea)
 from .config import Settings, PRESETS
 from .database import Database
 from .decisions import MODES, decide
@@ -19,6 +19,7 @@ from .models import InputState, Observation
 from .runtime import Runtime
 from .system import system_info
 from .windows import BUTTONS
+from .phase2_ui import Phase2UI
 
 STYLE = """
 QWidget { background:#171c24; color:#f2f5fa; font-size:13px; }
@@ -33,7 +34,7 @@ QTabBar::tab:selected { background:#166cda; }
 QGroupBox { border:1px solid #39465a; margin-top:12px; padding:15px; }
 """
 
-class Window(QMainWindow):
+class Window(Phase2UI, QMainWindow):
     def __init__(self, settings, directory, simulate=False, video=None):
         super().__init__()
         self.settings, self.directory = settings, directory
@@ -45,14 +46,14 @@ class Window(QMainWindow):
         self.info = None
         self.process = psutil.Process()
         self.process.cpu_percent()
-        self.setWindowTitle("MotoAssist • Phase 1")
+        self.setWindowTitle("MotoAssist • Phase 2")
         self.resize(990, 820)
         self.setStyleSheet(STYLE)
         pix = QPixmap(32,32); pix.fill(QColor("#166cda"))
         painter = QPainter(pix); painter.setPen(QColor("white")); painter.drawText(pix.rect(), Qt.AlignCenter, "M"); painter.end()
         self.icon = QIcon(pix); self.setWindowIcon(self.icon)
         self.tabs = QTabWidget(); self.setCentralWidget(self.tabs)
-        self.dashboard(); self.assistance(); self.learning(); self.performance(); self.preferences()
+        self.dashboard(); self.assistance(); self.learning(); self.performance(); self.preferences(); self.phase2_pages()
         self.tray = QSystemTrayIcon(self.icon, self)
         menu = QMenu(self)
         menu.addAction("Show MotoAssist", self.restore)
@@ -71,7 +72,8 @@ class Window(QMainWindow):
 
     def page(self, name):
         widget = QWidget(); layout = QVBoxLayout(widget); layout.setSpacing(12); layout.setContentsMargins(20,20,20,20)
-        self.tabs.addTab(widget, name); return layout
+        scroll=QScrollArea();scroll.setWidgetResizable(True);scroll.setWidget(widget)
+        self.tabs.addTab(scroll, name); return layout
 
     def dashboard(self):
         layout = self.page("Dashboard")
@@ -86,7 +88,7 @@ class Window(QMainWindow):
             self.analog[name] = bar; form.addRow(name.upper(),bar)
         layout.addLayout(form)
         self.buttons = QLabel(); layout.addWidget(self.buttons)
-        layout.addWidget(QLabel("Speed, target speed and lap timing: unavailable until gameplay recognition is implemented."))
+        self.live_hud=QLabel("Waiting for HUD recognition…"); self.live_hud.setWordWrap(True); layout.addWidget(self.live_hud)
         row = QHBoxLayout()
         for text, fn in (("Start recording",self.record), ("Stop recording",self.stop_record), ("Emergency stop",self.emergency_stop), ("Hide to tray",self.hide_to_tray)):
             button = QPushButton(text); button.clicked.connect(fn); row.addWidget(button)
@@ -94,7 +96,7 @@ class Window(QMainWindow):
 
     def assistance(self):
         layout = self.page("Riding Assistance")
-        label = QLabel("Live riding assistance is not available in Phase 1. The controls below exercise synthetic decisions only.")
+        label = QLabel("Live riding assistance is not available in this release. The controls below exercise synthetic decisions only.")
         label.setWordWrap(True); layout.addWidget(label)
         self.mode = QComboBox(); self.mode.addItems(MODES); layout.addWidget(self.mode)
         self.sim_enabled = QCheckBox("Enable simulated decisions (never sent to a game)"); layout.addWidget(self.sim_enabled)
@@ -113,7 +115,7 @@ class Window(QMainWindow):
 
     def learning(self):
         layout = self.page("Track Learning")
-        label=QLabel("Reference recording is available. Automatic profile generation, landmarks and HUD recognition are planned for later phases.\nGame-assisted reference laps contain physical input only; internal game corrections are unknown.")
+        label=QLabel("Record multiple reference laps, mark start/finish with F5, then generate and review a track profile.\nGame-assisted reference laps contain physical input only; internal game corrections are unknown.")
         label.setWordWrap(True); layout.addWidget(label)
         self.circuit=QLineEdit(); self.circuit.setPlaceholderText("Circuit label (user supplied)"); layout.addWidget(self.circuit)
         self.category=QLineEdit(); self.category.setPlaceholderText("Motorcycle / category / weather notes"); layout.addWidget(self.category)
@@ -129,15 +131,15 @@ class Window(QMainWindow):
     def performance(self):
         layout=self.page("Performance")
         self.metrics=QLabel(); self.metrics.setWordWrap(True); layout.addWidget(self.metrics)
-        layout.addWidget(QLabel("Inference and controller output latency: N/A (no model or virtual output).\nPer-process GPU usage: unavailable. Capture targets are not guarantees.\nProcessing overruns lower the capture target; OBS/GPU contention detection is a later feature."))
+        layout.addWidget(QLabel("OCR analysis latency is shown on the Recognition page. Controller output: N/A (no virtual output).\nPer-process GPU usage: unavailable. Capture targets are not guarantees.\nProcessing overruns lower the capture target; OBS/GPU contention detection is a later feature."))
         layout.addStretch()
 
     def preferences(self):
         layout=self.page("Settings"); form=QFormLayout(); self.fields={}
-        for name in ("game_title", "preset", "device_idx", "output_idx", "monitor_left", "monitor_top", "deadzone", "controller_stop_mask"):
+        for name in ("game_title", "preset", "device_idx", "output_idx", "monitor_left", "monitor_top", "deadzone", "controller_stop_mask", "speed_unit", "recognition_hz", "recognition_confidence"):
             value=getattr(self.settings,name)
             if name=="preset": field=QComboBox(); field.addItems(PRESETS); field.setCurrentText(value)
-            elif isinstance(value,float): field=QDoubleSpinBox(); field.setRange(0,0.89); field.setSingleStep(0.01); field.setValue(value)
+            elif isinstance(value,float): field=QDoubleSpinBox(); field.setRange(0,10 if name=="recognition_hz" else 1); field.setSingleStep(0.01); field.setValue(value)
             elif isinstance(value,int): field=QSpinBox(); field.setRange(-32768,65535); field.setValue(value)
             else: field=QLineEdit(value)
             self.fields[name]=field; form.addRow(name.replace("_"," ").title(),field)
@@ -162,11 +164,12 @@ class Window(QMainWindow):
     def detect_system(self): self.info=system_info()
     def history(self):
         self.sessions.clear()
-        for created,source,path in self.db.sessions(): self.sessions.addItem(f"{created} • {source} • {path}")
+        for created,source,path in self.db.sessions():
+            item=QListWidgetItem(f"{created} • {source} • {path}");item.setData(Qt.UserRole,path);self.sessions.addItem(item)
 
     def record(self):
         try:
-            path=self.runtime.start_recording(self.directory/"recordings", {"circuit_label": self.circuit.text(), "conditions": self.category.text(), "builtin_assists_enabled_or_unknown": self.builtin.isChecked()})
+            path=self.runtime.start_recording(self.directory/"recordings", {"circuit_label": self.circuit.text(), "conditions": self.category.text(), "category": self.bike_category.text(), "model": self.bike_model.text(), "weather": self.weather.text(), "builtin_assists_enabled_or_unknown": self.builtin.isChecked()})
             recorder=self.runtime.recorder
             self.db.record_session(path,recorder.meta["source"])
             self.history(); logging.info("Recording started %s; assistance_active=false",path)
@@ -187,11 +190,12 @@ class Window(QMainWindow):
         logging.warning("Emergency stop; assistance_active=false")
 
     def shortcut(self,action):
-        if action=="record": self.stop_record() if self.runtime.recorder else self.record()
+        if action=="lap": self.mark_lap()
+        elif action=="record": self.stop_record() if self.runtime.recorder else self.record()
         elif action=="stop": self.emergency_stop()
         elif action=="assist": self.sim_enabled.setChecked(not self.sim_enabled.isChecked())
         elif action=="mode": self.mode.setCurrentIndex((self.mode.currentIndex()+1)%len(MODES))
-        else: self.statusBar().showMessage(f"{action.title()} live assistance is unavailable in Phase 1.")
+        else: self.statusBar().showMessage(f"{action.title()} live assistance is unavailable in this release.")
 
     def refresh(self):
         if self.runtime.emergency: self.emergency_stop()
@@ -219,9 +223,10 @@ class Window(QMainWindow):
             r=self.runtime.recorder; self.record_status.setText(f"Recording: {r.saved} frames • {r.dropped} dropped • {r.path}"+(f" • ERROR: {r.error}" if r.error else ""))
 
     def refresh_metrics(self):
+        self.update_phase2()
         frame,_,_,fps=self.runtime.snapshot()
         fresh=frame and time.perf_counter()-frame.timestamp<0.5
-        self.metrics.setText(f"Capture: {fps if fresh else 0:.1f} FPS • current target {self.runtime.target_fps:.1f} FPS\nLast capture call: {frame.capture_ms if fresh else 0:.2f} ms\nProcess CPU: {self.process.cpu_percent():.1f}% (may exceed 100% across cores)\nProcess RAM: {self.process.memory_info().rss/1024**2:.1f} MiB\nDetection confidence: unavailable; no gameplay recognition yet")
+        self.metrics.setText(f"Capture: {fps if fresh else 0:.1f} FPS • current target {self.runtime.target_fps:.1f} FPS\nLast capture call: {frame.capture_ms if fresh else 0:.2f} ms\nProcess CPU: {self.process.cpu_percent():.1f}% (may exceed 100% across cores)\nProcess RAM: {self.process.memory_info().rss/1024**2:.1f} MiB\nRecognition confidence: see per-module diagnostics")
 
     def error(self,exc):
         logging.error("UI operation: %s",exc); QMessageBox.warning(self,"MotoAssist",str(exc))
@@ -233,6 +238,11 @@ class Window(QMainWindow):
     def closeEvent(self,event):
         if not self.quitting and self.settings.minimize_to_tray and QSystemTrayIcon.isSystemTrayAvailable(): self.hide(); event.ignore(); return
         self.timer.stop(); self.metrics_timer.stop(); self.hotkeys.close()
-        try: self.runtime.stop()
+        try:
+            self.job_cancel.set()
+            if self.job_thread and self.job_thread.is_alive():
+                self.job_thread.join(timeout=10)
+                if self.job_thread.is_alive(): raise RuntimeError("Reference task is stopping; retry Quit shortly")
+            self.runtime.stop()
         except Exception as exc: self.error(exc); event.ignore(); return
         self.db.close(); self.tray.hide(); event.accept(); QApplication.instance().quit()

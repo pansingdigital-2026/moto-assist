@@ -17,6 +17,9 @@ def main():
     (directory/"logs").mkdir(exist_ok=True)
     handler=RotatingFileHandler(directory/"logs/motoassist.log",maxBytes=2_000_000,backupCount=3,encoding="utf-8")
     logging.basicConfig(level=logging.INFO,handlers=[handler],format="%(asctime)s %(levelname)s %(threadName)s %(message)s")
+    controller_log=RotatingFileHandler(directory/"logs/controller-detection.log",maxBytes=2_000_000,backupCount=3,encoding="utf-8")
+    controller_log.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(threadName)s %(message)s"))
+    logging.getLogger("motoassist.controllers").addHandler(controller_log)
     from .windows import enable_dpi_awareness
     enable_dpi_awareness()
     from PySide6.QtWidgets import QApplication, QMessageBox

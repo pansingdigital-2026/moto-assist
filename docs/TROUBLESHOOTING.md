@@ -14,3 +14,15 @@
 - **Window disappears:** restore from tray. Quit from tray actually stops workers and saves data. If the desktop has no tray, closing exits normally.
 - **Invalid settings:** the startup dialog names the settings file. Back it up and rename it to reset defaults. Existing recordings remain untouched.
 - **Diagnostics:** `%LOCALAPPDATA%\MotoAssist\logs\motoassist.log`; recording folders include timestamp indexes and manifest. Logs never claim live assistance was active in this release.
+
+## Version 0.2 recognition and controller additions
+
+- Rerun setup.bat after updating; otherwise SDL2/OCR imports may be missing. Read CONTROLLERS.md and run controller_test.bat. Simulation intentionally shows synthetic inputs; use run.bat without --simulate for physical input.
+- Inspect Diagnostics for every XInput slot and SDL device inventory. If a connected native device has no changing input, explicitly select SDL2. Both representations can refer to one physical Xbox controller.
+- Unknown speed/gear/timer/lap values: tightly calibrate the numeric region on a saved gameplay screenshot. Set the speed unit correctly; avoid including unrelated HUD text. Auto detection requires unambiguous labels.
+- Unknown road or bike offset: calibrate asphalt sample, road search and bike anchor. Lighting, shadows, wet surfaces or changed cameras invalidate appearance assumptions. These are image-space heuristics.
+- Unknown crash/recovery: this release requires explicit readable crash/recovery text. Absence of evidence does not mean the rider is upright. No input correction is ever sent.
+- Profile generation requires two complete laps and at least five reliable speed readings each. F5 boundaries need three presses for two laps; prerecorded sessions can use Edit recorded lap boundaries. Incomplete sessions, mismatched conditions and mixed source types are rejected.
+- Duplicate imported profile IDs are rejected. Review the existing profile before deleting it if you intend to import that ID again; reference recordings remain separate.
+- Recognition is slower than capture by design; a latest-frame worker targets 2 Hz, adjustable in Settings. Lower the rate if CPU contention affects game/OBS. Stale data is labelled. No GPU resource sharing guarantee is made.
+- In restricted Linux cloud development, set MOTOASSIST_DATA_DIR to a writable /tmp or /workspace path. An unwritable home data directory is an environment limitation, not a controller failure.

@@ -1,16 +1,19 @@
-# Windows acceptance — pending user execution
+# Windows acceptance checklist — version 0.2
 
-Run these checks separately on the RTX 3050 laptop first, then the RTX 3060 Ti desktop. Record Windows/NVIDIA versions, resolution, display arrangement, controller connection type and game/OBS settings. Never mark these complete from Linux simulation.
+The user has confirmed that 0.1 launches on Windows and runs alongside MotoGP 26 without crashing. They reported no physical controller inputs in 0.1. Do not expand those observations into validation of 0.2.
 
-- Run setup.bat, test.bat, run.bat --simulate. Verify synthetic image, axes, FPS, recording and normal Quit.
-- Run live. Verify Windows reports the actual NVIDIA GPU and integrated adapter (if present). Compare with Device Manager.
-- Connect Xbox via cable, then wireless; move both sticks, triggers and each standard button. Compare endpoints/dead centre. Unplug and reconnect; ensure stale values clear and polling recovers.
-- Start offline MotoGP 26. Confirm the exact window-title filter, client area, foreground state and capture preview. Alt-tab: image must clear and capture must suspend. No game memory access is used.
-- Exercise 1920×1080, 2560×1440 and 3840×2160 where the display supports them. Check Windows scaling and borderless/windowed capture. Set DXcam device/output and desktop origin when needed; reject windows spanning outputs.
-- F6 with the game focused starts a session; ride for 30 seconds; F6 stops. Validate manifest `complete`, JPEG files, monotonically increasing timestamps, physical input labels and input validity. Do not assume built-in game assists appear in the recorded input.
-- Confirm registered hotkeys work in background and conflict messages appear for occupied keys. F12 may be unavailable; configure a replacement and verify Back + Start stop.
-- Hide/restore via tray; Quit while recording and confirm the recording finalizes and process exits.
-- Run OBS alongside the game. Compare game frame time and OBS dropped frames with MotoAssist off and on. Try Lightweight first; collect process CPU/RAM and actual capture FPS. No numerical overhead limit has been validated yet.
-- Run build.bat; copy the whole dist/MotoAssist folder to a clean Windows account without development Python. Launch, record, close, restart and verify persisted settings.
+Run on the RTX 3050 laptop first, then RTX 3060 Ti desktop. Record Windows/NVIDIA versions, display arrangement, resolution, Xbox model/firmware, USB/Bluetooth and Steam Input/device-hiding settings if applicable.
 
-No virtual inputs should be emitted in any check. There is no autopilot or actual braking/steering assistance to validate in Phase 1. Pause/menu recognition is not implemented; those frames may be recorded. Report results and logs before enabling subsequent development phases.
+1. Rerun setup.bat, then test.bat. Check version 0.2 and seven tabs. Tests include actual SDL virtual-device IO and bundled OCR; they do not require or verify physical hardware.
+2. Run controller_test.bat with the game closed and open, in foreground and background. Test auto, xinput and sdl2; record backend inventory, slot return codes and inputs. Select the working backend/device in Diagnostics.
+3. Verify both sticks, both triggers, all standard buttons and D-pad. Test USB and Bluetooth separately. Disconnect/reconnect and refresh. Unselected/duplicate API representations must not merge inputs; stale values must clear. Back+Start must stop recording.
+4. Confirm GPU inventory, foreground game detection and DXcam capture still work. Verify supported resolutions, Windows scaling and hybrid GPU/output configuration. Recalibrate when camera or HUD layout changes.
+5. Calibrate each visible numeric HUD field and minimap; inspect readings against the actual display. Label representative frames manually before claiming accuracy. Check unknown states when HUD is hidden or cropped.
+6. Calibrate clear asphalt/search region and fixed-camera bike anchor. Check road edges, curve direction, relative offset and colored ideal-line sections on straights, corners, shadows, grass, wet track and off-track frames. Expect unknown or incorrect heuristic estimates in difficult conditions; log examples.
+7. Pause, resume, load, crash and recover. Explicit state-text detection needs readable matching text; unlabelled states remain unknown. No virtual output must occur under any circumstances.
+8. Record at least two complete offline laps with game assists enabled. F5 marks start/finish three times; F6 stops. Check manifest complete, frame/observation sequence/timestamps, physical-input age/provenance, events and drop counts.
+9. Generate and review a profile. Check reference speeds, time-aligned corners, line colors, visual braking intervals, reference laps, landmark descriptors, category/weather and confidence. Export/import on the other PC; delete a profile and verify recordings remain.
+10. Analyze a prerecorded gameplay video. Verify media timestamps and unavailable original inputs; edit lap boundaries in seconds if OCR cannot segment laps. Cancel a long task and verify partial output is marked incomplete.
+11. Confirm global shortcuts (F12 may be reserved), tray hide/restore/quit and shutdown while recording/analyzing. No overlay should appear in OBS footage.
+12. Compare game frame time and OBS dropped frames with the app off/on, Lightweight first. Record capture FPS, OCR latency, CPU/RAM, not just configured targets. No numerical performance guarantee is made.
+13. Run build.bat on Windows, then test the entire dist/MotoAssist folder on an account without development Python, including SDL discovery and offline OCR models.

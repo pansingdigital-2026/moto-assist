@@ -21,4 +21,18 @@ class Database:
             self.connection.execute("INSERT OR IGNORE INTO sessions(id,path,source,assistance_active) VALUES (?,?,?,0)", (path.name, str(path), source))
     def sessions(self):
         return self.connection.execute("SELECT created_at,source,path FROM sessions ORDER BY created_at DESC").fetchall()
+    def save_profile(self, profile, replace=False):
+        from .learning import validate_profile
+        validate_profile(profile)
+        sql="INSERT OR REPLACE" if replace else "INSERT"
+        with self.connection:
+            self.connection.execute(sql+" INTO profiles(id,circuit,category,model,weather,version,confidence,data_json) VALUES (?,?,?,?,?,?,?,?)", (profile["id"],profile["circuit"],profile["category"],profile["model"],profile["weather"],profile["version"],profile["confidence"],json.dumps(profile,allow_nan=False)))
+    def profiles(self):
+        return self.connection.execute("SELECT id,circuit,category,weather,confidence FROM profiles ORDER BY circuit").fetchall()
+    def get_profile(self, identity):
+        row=self.connection.execute("SELECT data_json FROM profiles WHERE id=?",(identity,)).fetchone()
+        if not row:raise ValueError("Profile no longer exists")
+        return json.loads(row[0])
+    def delete_profile(self, identity):
+        with self.connection:self.connection.execute("DELETE FROM profiles WHERE id=?",(identity,))
     def close(self): self.connection.close()

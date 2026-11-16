@@ -16,29 +16,6 @@ class Gamepad(C.Structure):
 class State(C.Structure):
     _fields_ = [("packet", C.c_uint32), ("pad", Gamepad)]
 
-class XInput:
-    def __init__(self):
-        self.get = None
-        for name in ("xinput1_4", "xinput9_1_0", "xinput1_3"):
-            try:
-                self.dll = C.WinDLL(name)
-                self.get = self.dll.XInputGetState
-                self.get.argtypes = [W.DWORD, C.POINTER(State)]
-                self.get.restype = W.DWORD
-                break
-            except OSError: pass
-        if self.get is None: raise RuntimeError("Windows XInput DLL unavailable")
-        self.slot = 0
-
-    def poll(self):
-        for i in [self.slot] + [j for j in range(4) if j != self.slot]:
-            state = State()
-            if self.get(i, C.byref(state)) == 0:
-                self.slot = i
-                p = state.pad
-                return InputState(time.perf_counter(), True, i, axis(p.lx), axis(p.ly), axis(p.rx), axis(p.ry), p.lt/255, p.rt/255, p.buttons)
-        return InputState(time.perf_counter())
-
 class Windows:
     def __init__(self):
         if os.name != "nt": raise RuntimeError("Live capture requires Windows; use --simulate")

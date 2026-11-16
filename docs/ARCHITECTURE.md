@@ -1,39 +1,48 @@
-# Architecture
-
-## Phase 1 implementation
+# Architecture — version 0.2
 
 ```mermaid
 flowchart LR
-    X[XInput polling 125 Hz target] --> H[Bounded input history]
-    D[DXcam / synthetic / local video] --> F[Latest frame slot]
-    H --> R[Bounded recorder queue]
-    F --> R
-    R --> J[JPEG + timestamp JSONL + manifest]
-    F --> U[Qt UI 10 Hz]
+    X[Native XInput / SDL2 / synthetic] --> H[Bounded timestamped input history]
+    C[DXcam / synthetic / local video] --> F[Latest frame slot]
+    F --> A[Recognition worker]
+    A --> O[Per-module observations]
+    F --> R[Bounded recorder]
+    H --> R
+    O --> R
+    R --> D[JPEG + frames + observations + events]
+    D --> L[Multi-lap profile generator]
+    L --> S[SQLite + portable JSON]
+    F --> U[Qt UI]
     H --> U
-    S[Synthetic observation controls] --> E[Pure decision engine]
-    E --> U
-    U --> DB[SQLite session index]
+    O --> U
 ```
 
-`windows.py`: ctypes bindings with pointer-width-safe signatures, XInput reconnection across four user slots, visible window title enumeration, foreground check, client rectangle coordinates and DPI awareness. Dashboard uses raw normalized axes; XInput does not expose the Xbox Guide button. Wired/wireless support depends on the controller being exposed by Windows XInput. Only one active slot is monitored.
+## Execution and ownership
 
-`runtime.py`: independent input and capture threads, immutable snapshots and locked bounded input history; no growing frame pipeline. DXcam is created, grabbed and released by the capture thread. Capture is limited to a matching foreground window's client rectangle. Multi-monitor origins and adapter/output indices are configurable; cross-monitor windows are rejected. Images are reduced to a preset width after acquisition. Stale previews are cleared. A recording worker handles encoding/storage. UI refresh runs at 10 Hz and metrics at 1 Hz; GPU detection runs once off the GUI thread.
+`controllers.py` owns native DLL routes and SDL handles on the controller thread. `ControllerManager` enumerates, selects, retries and reports devices without blocking capture. `controller_test.py` is independent of Qt/capture/OCR. `windows.py` now contains shared fixed-width XInput data structures plus documented window/DPI APIs; the old polling implementation was removed.
 
-`recording.py`: bounded eight-frame queue; drop-new policy keeps accepted ordering and logs a count. Writes JPEG then JSONL with flush, final manifest marks clean closure or an error. The initial manifest is incomplete so abrupt termination is distinguishable. Disk space threshold is 256 MiB. Errors stop the writer and are visible in the UI. This format favors explicit timing over fixed-FPS video; it can use substantial storage. Frames are immutable after publication. Controller timestamps are acquisition-completion times, not game-consumption times.
+`runtime.py` runs input (~125 Hz target), capture (preset target) and recognition (2 Hz default) independently. Latest-frame replacement prevents analysis backlog. Capture requires a matching foreground window. Controller input continues in the background. A retained last frame permits calibration after switching focus. Shared snapshots are published under a lock; controller reconfiguration and analysis calibration are handed to the owning worker. Capture/recording remain usable when recognition fails.
 
-`decisions.py` and `models.py`: pure simulation only, with bounded outputs, speed-dependent braking and confidence/focus/staleness/manual-override gates. There is no virtual output adapter. No actual steering, trail braking, grip estimation or crash recognition is claimed.
+`vision.py` uses CPU-only bundled RapidOCR/ONNX sessions (two intra-op threads, one inter-op thread) and OpenCV capped at two threads. OCR reads labelled HUD candidates, calibrated single-line crops and state text. Parsing enforces gear/speed/timer/lap ranges. Small/unlabelled/ambiguous/low-confidence text is unknown. Calibration is normalized, not hard-coded to game coordinates.
 
-`config.py`: validated settings with atomic replacement. Data defaults outside the checkout and can be redirected. `database.py`: SQLite version 1 stores sessions and reserves a versioned profile table; profile generation/import/export are not implemented. `system.py`: Windows CIM GPU enumeration and process metrics. `hotkeys.py`: documented RegisterHotKey with registration-conflict reporting and cleanup. UI controls do not overlay the game.
+Road segmentation compares Lab appearance against a manually selected asphalt patch, limits search to a calibrated region and follows a connected component. Image-space boundaries and perspective centreline bend produce approximate corner direction; bike offset uses an explicitly calibrated fixed-camera anchor. HSV blobs inside the road corridor are candidate green/yellow/red ideal-line sections. The minimap module extracts a bright outline and colored marker in a calibrated ROI. ORB features plus perceptual image hashes form visual references. No world coordinates, true lean angle, grip, optimal line or hidden physics are inferred.
 
-## Boundaries for later phases
+State recognition requires visible text for pause/loading/crash/recovery and two consecutive observations. Visible speed plus road evidence can suggest gameplay but cannot distinguish every replay/menu. Unlabelled crashes return unknown. Confidence values are OCR scores and heuristics, not statistically calibrated accuracy.
 
-Add independent `vision` (frame → confidence-bearing observations), `hud` (calibrated normalized ROIs), `track_recognition` (landmarks → uncertain progression), `learning` (multiple reference laps → versioned candidate profile), and `inference` (optional ONNX provider) packages when implementing those phases. They are design boundaries, not empty implementations today. Braking, steering and throttle controllers should become separate calibrated components before hardware output is allowed.
+`calibration.py` supplies a drag-to-select editor with correct letterbox-to-normalized-coordinate conversion. `phase2_ui.py` adds recognition/diagnostics and profile workflows while preserving dashboard, simulation, settings and tray. Long video/profile jobs run off the GUI thread; cancellation preserves incomplete session evidence.
 
-A future circuit profile payload must include layout representation, reference landmarks, corners (direction/curvature), target speed and braking/acceleration zones, normalized racing-line points, reference lap IDs, best valid lap time, category/model/weather, confidence and schema version. Profiles must distinguish estimated image coordinates from world coordinates. Never manufacture circuit data to fill these fields.
+## Recording and learning
 
-No official MotoGP 26 telemetry interface has been verified. Initial integration therefore uses screen capture. Game focus does not prove active racing: menus, replays, loading screens and pauses can be recorded in Phase 1. Gameplay-state recognition is a prerequisite to any future live assistance. Physical and virtual devices are not combined now, so duplicate-input handling is unnecessary until a supported output backend is selected.
+`recording.py` writes JPEG frames and per-frame raw controller samples through a bounded eight-frame queue. A separate bounded 128-observation queue preserves the matching sequence/timestamp, input sample and provenance for each analyzed frame. Observations can exist for a frame whose image was dropped; join on sequence against frames.jsonl before opening images. No invented temporal alignment is added. Manual lap-boundary events finalize into events.jsonl. The initial manifest is incomplete; final complete/error/drop counts distinguish graceful closure from failure. Physical inputs older than 100 ms are invalid. These are acquisition-completion times, not game-consumption or hardware synchronization timestamps.
 
-## Performance strategy
+`analyze_video.py` decodes a prerecorded file sequentially, analyzes selected frames and writes media time (frame index/FPS). Original controller input is unavailable. Offline analysis avoids live backlog/drop constraints and does not overwrite an existing destination. The GUI indexes completed output as a reference session; a CLI is also provided.
 
-Preset targets: Lightweight 30 FPS / width ≤960, Balanced 60 / ≤1280, Performance 120 / ≤1920. Preserve aspect ratio and do not upscale. Targets do not assert these rates on either user's PC. Current adaptation reduces the rate on local capture/resize overruns, with a floor of 10 FPS; no direct OBS or GPU-load arbitration exists yet. Prioritize the laptop, one fixed third-person camera, 1080p first. JPEG work is on a bounded worker; high-resolution capture can still compete with OBS. Measure before adding models, zero-copy sharing or GPU inference.
+`learning.py` segments explicit lap markers, or confirmed consecutive OCR lap-number transitions. At least two complete laps with adequate speed evidence are required. Each lap is aligned by normalized elapsed time; speed bins aggregate medians and track coverage/sample support. Perspective bend changes yield corner entry/exit estimates. Colored-line observations form visual braking intervals. Landmarks/line sections retain lap and frame references. Category/model/weather labels must match; different provenance (synthetic/video/Windows) cannot mix. No control policy or global track localization is trained.
+
+`database.py` stores profiles and session history using parameterized SQL and validated finite JSON. Import/export is versioned and size-limited (20 MiB), rejects malformed profiles and duplicate IDs, and never unpickles or loads referenced paths. Delete removes only the selected profile; recordings remain. Exported profiles embed extracted reference data but not images; copy full sessions separately.
+
+## Boundaries and performance
+
+Live riding output remains absent. `decisions.py` continues to exercise synthetic bounded decisions and safety gates. A maintained, permitted virtual output and physical-device isolation path remains a prerequisite to actual intervention.
+
+Capture targets remain 30/60/120 FPS at widths ≤960/1280/1920. Recognition target is independent and may run below 2 Hz on hardware. Capture overruns reduce its target; direct game/OBS GPU contention detection is not implemented. CPU inference avoids allocating game GPU resources by default. Cropped HUD readability must be checked at the selected capture resolution. Profiles and calibration are camera/layout/conditions specific.

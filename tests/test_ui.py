@@ -13,7 +13,7 @@ def test_desktop_workflow(tmp_path):
         while window.runtime.frame is None and time.perf_counter()<end:
             app.processEvents();time.sleep(0.02)
         window.refresh()
-        assert window.tabs.count()==5
+        assert window.tabs.count()==7
         assert "SIMULATION" in window.connection.text()
         assert window.preview.pixmap() and not window.preview.pixmap().isNull()
         window.record(); assert window.runtime.recorder

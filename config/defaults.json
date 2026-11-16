@@ -1,4 +1,10 @@
 {
+  "controller_backend": "auto",
+  "controller_device": "auto",
+  "hud_rois": {},
+  "speed_unit": "km/h",
+  "recognition_hz": 2.0,
+  "recognition_confidence": 0.8,
   "game_title": "MotoGP",
   "preset": "Lightweight",
   "device_idx": 0,
@@ -9,6 +15,7 @@
   "minimize_to_tray": true,
   "controller_stop_mask": 48,
   "hotkeys": {
+    "lap": "F5",
     "record": "F6",
     "brake": "F7",
     "assist": "F8",
